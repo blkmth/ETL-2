@@ -1,0 +1,13 @@
+# Secrets — ne jamais committer
+.env
+
+# Dossier IDE PyCharm
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs Airflow
+logs/

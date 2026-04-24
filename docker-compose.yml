@@ -1,67 +1,66 @@
-# fichier docker-compose
-
+## version du format de docker compose
 version: '3.8'
 
-## definition de airflow
+## version de airflow
 x-airflow-common: &airflow-common
-  image : apache/airflow:2.9.1
-
+  ## image docker de airflow
+  image: apache/airflow:2.9.1
   environment:
-    AIRFLOW_CORE_EXECUTOR: LocalExecutor
+    ## pour signifier que les taches doivent touener dans le meme conteneur
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    ## adresse de la base de donnée postgres interne (base de airflow pas ma base de donnée )
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    ## clé de chiffrement pour les mots de passe
+    AIRFLOW__CORE__FERNET_KEY: ''
+    ## mettre en pause automatiquement les nouveau dag crées
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    ## desactive les Das d'exemple
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    ## methode d'authentification classique pour se connecter a airflow login / mot de passe
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    ## clé secrete pour securiser les sessions web
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'azerty'
+    ## clé api open weather
+    OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+    ## connexion a ma base de donné mon airflow a moi
+    TARGET_DB_CONN: postgresql+psycopg2://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}
 
-## connexion de airflow a sa propre base de donnée postgresql
-## c'ewt que sont stockée les meta données
-
-    AIRFLOW_DATABASE_SQL_ALCHEMY_CON: postgresql+psycopg2://airflow:airflow@postgres/airflow
-
-    AIRFLOW_CORE_FERNET_KEY: ''
-    AIRFLOW_CORE_DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW_CORE_LOAD_EXEMPLES: 'false'
-    AIRFLOW_API_AUTH_BACKENDS: 'airflow.api.auth.backend.basic.auth'
-    AIRFLOW_WEBSERVER_SECRET_KEY: 'azerty'
-
-## les variables provenant du fichier .env
-    OPENWEATHER_API_KEY: ${b8aa83e138f429f02f2a613da8c9fa4a}
-    TARGET_DB_CONN: postgresql+psycopg2://${DB_USER}:${DB_PASSWORD}:@${DB_HOST}:5432/${DB_NAME}
-
+  ## les vomumes font le pont entre le conteneur et mon ordi (stockages)
+  ## gauche dossier sur mon ordi droite dossier dansle conteneur
   volumes:
+    - ./dags:/opt/airflow/dags
+    - ./plugins:/opt/airflow/plugins
+    - ./logs:/opt/airflow/logs
 
-## ces lignes branchent les dossiers locaux dans le fichier docker
-## qunad on modiifie le fichier du dag  airfloow le voit directement pas besoin de redemarrer
-
-  - ./dags:/opt/airflow/dags
-  - .plugins:/opt/airflow/plugins
-  - ./logs:/opt/airflow/logs
-
+  ## pour signifier que le contenuer doit demarré uniquement que la bd est pretre
   depends_on:
     postgres:
-      condition: service_healthy  # airflow attend que postgres soit pret avant de demarrer
+      condition: service_healthy
 
+## les differents conteneurs qui vont tourner
 services:
 
-  ## ------------------ SERVICE 1: POSTGRESQL INTERNE D'AIRFLOW ------------------------------------
-  ## CECI EST LA BASE DE DONNÉE  DE AIRFLOW PAS LA MIENNE POUR STOCKER (LES DAGS,LOGS,USERS ....)
-
+  ## ------- service 1 : PostgreSQL — Base de données interne d'Airflow
+  ## Stocke : les DAGs, l'historique des runs, les users, les logs
+  ## C'est PAS ta base de données métier, c'est celle d'Airflow
   postgres:
-    image: postgres:15
+    image: postgres:15  # version de postgre
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-
     healthcheck:
-      test: ["cmd", "pg_isready", "-U", "airflow"]
+      test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
       retries: 5
-
     ports:
-      - "5433:5432" ## port 5433 sur ma machine et port 5432 dans le conteneur car postgres tourne deja sur 5432 en local
+      - "5433:5432"
 
-  ## --------------- SERVICE 2: INTERFACE WEB D'AIRFLOW ----------------------------------------------
-  ## VISIBLE SUR HTTP://LOCALHOST:8080
-
+  ## --------SERVICE 2 : Webserver — L'interface visuelle d'Airflow
+  ## Accessible sur http://localhost:8080
+  ## Permet de voir les DAGs, déclencher des runs, lire les logs
   airflow-webserver:
-    <<: *airflow-common   ## herite de toute la configuration definit plus haut
+    <<: *airflow-common
     command: webserver
     ports:
       - "8080:8080"
@@ -70,17 +69,17 @@ services:
       interval: 10s
       retries: 5
 
-  # ---------------- SERVICE 3 : Scheduler Airflow -------------------------------------------------------------
-  # Le cerveau d'Airflow — il surveille en permanence les DAGs
-  # et déclenche les tâches au bon moment
+  ## SERVICE 3 : Scheduler — Le cerveau d'Airflow
+  ## Surveille en permanence tous tes DAGs
+  ## Déclenche les tâches au bon moment selon leur planning (schedule)
+  ## Sans lui, aucun DAG ne s'exécute automatiquement
   airflow-scheduler:
-   <<: *airflow-common
-   command: scheduler
+    <<: *airflow-common
+    command: scheduler
 
-  ## ---------------- SERVICE 4 : INITIALISATION  -------------------------------------------------
-  ## Ce service crée les tables internes d'Airflow et le compte admin
-  ## Une fois terminé, il s'arrête tout seul (restart: "no")
-
+  ## SERVICE 4 : Init — Script d'initialisation (tourne UNE SEULE fois)
+  ## Prépare la base de données et crée le compte administrateur
+  ## Une fois terminé, ce conteneur s'arrête tout seul (restart: "no")
   airflow-init:
     <<: *airflow-common
     command: >
@@ -92,6 +91,6 @@ services:
             --lastname User
             --role Admin
             --email mthblk61@gmail.com
-            --password admin 
+            --password admin
       "
-    restart: no
+    restart: "no"
