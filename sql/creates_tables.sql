@@ -12,11 +12,11 @@ CREATE TABLE weather_data (
     weather_main    varchar(50) not null ,
     description     varchar(200) ,
     collected_at    timestamp not null ,
-    loaded_at       timestamp not null ,
+    loaded_at       timestamp not null
 ) ;
 
 -- index
-CREATE INDEX idx weather_city ON weather_data(city) ;
-CREATE INDEX idx weather_collected ON weather_data(collected_at) ;
+CREATE INDEX idx_weather_city ON weather_data(city);
+CREATE INDEX idx_weather_collected ON weather_data(collected_at);
 
 
