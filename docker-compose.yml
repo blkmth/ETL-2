@@ -1,0 +1,97 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.1
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'azerty'
+    OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+
+    ## ── Variables Airflow injectées automatiquement (préfixe AIRFLOW_VAR_) ──
+    AIRFLOW_VAR_OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+    AIRFLOW_VAR_WEATHER_CITIES: '["Paris","Lyon","Marseille","Bordeaux","Lille","Abidjan","Dakar","Casablanca","Tunis","Cairo","Montreal","Toronto","New York","Los Angeles","Mexico City","Sao Paulo","Buenos Aires","London","Berlin","Madrid","Rome","Moscow","Istanbul","Dubai","Mumbai","Bangkok","Tokyo","Seoul","Sydney","Cape Town"]'
+
+    ## ── Connections Airflow injectées automatiquement (préfixe AIRFLOW_CONN_) ──
+    AIRFLOW_CONN_OPENWEATHER_API: 'http://api.openweathermap.org'
+    AIRFLOW_CONN_POSTGRES_ETL: 'postgresql://${DB_USER}:${DB_PASSWORD}@postgres-metier:5432/${DB_NAME}'
+
+    ## ← HOST remplacé par le nom du service Docker "postgres-metier"
+    TARGET_DB_CONN: postgresql+psycopg2://${DB_USER}:${DB_PASSWORD}@postgres-metier:5432/${DB_NAME}
+
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./plugins:/opt/airflow/plugins
+    - ./logs:/opt/airflow/logs
+
+  depends_on:
+    postgres:
+      condition: service_healthy
+    ## ← Airflow attend aussi que ta base métier soit prête
+    postgres-metier:
+      condition: service_healthy
+
+services:
+
+  ## SERVICE 1 : PostgreSQL interne Airflow (inchangé)
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      ## persistance Variables, Connections, users, runs Airflow
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+
+  ## SERVICE 2 : PostgreSQL métier — ta base de données weather
+  postgres-metier:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER}"]
+      interval: 5s
+      retries: 5
+    ports:
+      ## port 5434 pour ne pas entrer en conflit avec le postgres interne (5433)
+      - "5434:5432"
+    volumes:
+      ## persistance des données entre les restarts
+      - postgres-metier-data:/var/lib/postgresql/data
+
+  ## SERVICE 3 : Webserver
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 5
+
+  ## SERVICE 4 : Scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+
+  ## SERVICE 5 : Init
+  airflow-init:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username admin --firstname Admin --lastname User --role Admin --email mthblk61@gmail.com --password admin"
+    restart: "no"
+
+volumes:
+  postgres-metier-data:
+  postgres-airflow-data:
